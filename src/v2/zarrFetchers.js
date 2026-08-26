@@ -3,6 +3,20 @@
 // all data from rfsv2 are zarr version/format 2
 import {FetchStore, get, open} from "zarrita"
 
+// Some rfsv2 stores (e.g. fdc.zarr) were written with Python's bare NaN/Infinity literals in their
+// metadata, which are invalid JSON and make zarrita's JSON.parse fail. Quote those tokens on the way
+// out so parsing succeeds; zarrita already interprets the quoted-string form for float fill_value.
+class SanitizingFetchStore extends FetchStore {
+  async get(key, opts) {
+    const bytes = await super.get(key, opts);
+    if (bytes && /\.(zarray|zattrs|zgroup|zmetadata)$/.test(key)) {
+      const text = new TextDecoder().decode(bytes).replace(/:\s*(-?Infinity|NaN)\b/g, ': "$1"');
+      return new TextEncoder().encode(text);
+    }
+    return bytes;
+  }
+}
+
 const resolveRiverIdToIndex = async ({zarrUrl, riverId, idx, idVariable}) => {
   // idx is preferred. if not provided, riverId must be given to look up the index.
   // validate that at least one of riverId or idx is provided
@@ -16,7 +30,7 @@ const resolveRiverIdToIndex = async ({zarrUrl, riverId, idx, idVariable}) => {
 }
 
 const fetchZarrValues = async ({zarrUrl, variable, selection = null}) => {
-  const store = new FetchStore(`${zarrUrl}/${variable}`);
+  const store = new SanitizingFetchStore(`${zarrUrl}/${variable}`);
   const node = await open.v2(store);
   const array = await get(node, selection);
   return [...array.data];
@@ -28,11 +42,12 @@ const getCoordinateValues = async ({zarrUrl, variable}) => {
 
 const getCoordinateIndex = async ({zarrUrl, variable, value}) => {
   let coordinates = await getCoordinateValues({zarrUrl, variable});
-  return coordinates.indexOf(value);
+  // int64 coordinates deserialize to BigInt; normalize both sides so Number lookups still match
+  return coordinates.map(Number).indexOf(Number(value));
 }
 
 const getTimeCoordinateValues = async ({zarrUrl}) => {
-  const store = new FetchStore(`${zarrUrl}/time`);
+  const store = new SanitizingFetchStore(`${zarrUrl}/time`);
   const node = await open.v2(store);
   const array = await get(node, [null]);
 
