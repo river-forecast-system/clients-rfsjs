@@ -33,13 +33,11 @@ const metadataTable = async ({riverId, columns, baseUrl} = {}) => {
   return out;
 };
 
-// The VPU number (VPUCode) for a river.
 const riverToVpu = async ({riverId, baseUrl} = {}) => {
   const {VPUCode} = await metadataTable({riverId, columns: ["VPUCode"], baseUrl});
   return VPUCode;
 };
 
-// Coordinates for a river id — `{riverId, lat, lon}`.
 const riverToLatlon = async ({riverId, baseUrl} = {}) => {
   const target = Number(riverId);
   if (!Number.isFinite(target)) {

@@ -3,6 +3,8 @@
 import forecast from "./forecast.js";
 import retrospective from "./retrospective.js";
 import returnPeriods from "./returnPeriods.js";
+import dates from "./dates.js";
+import forecastRecords from "./forecastRecords.js";
 import fdc from "./fdc.js";
 import sfdc from "./sfdc.js";
 import polyfits from "./polyfits.js";
@@ -13,6 +15,8 @@ export {
   forecast,
   retrospective,
   returnPeriods,
+  dates,
+  forecastRecords,
   fdc,
   sfdc,
   polyfits,

@@ -34,3 +34,16 @@ try {
 } catch (e) {
   console.log('Hydroweb WSE:', e.message);
 }
+
+console.log('\n=== v2 forecast listing ===');
+const v2dates = await rfs.v2.dates();
+console.log('Dates:', {count: v2dates.length, first: v2dates[0], last: v2dates[v2dates.length - 1], sorted: v2dates.every((d, i) => i === 0 || d >= v2dates[i - 1])});
+const v2rec = await rfs.v2.forecastRecords({riverId: 710431167, startDate: v2dates[0], endDate: v2dates[2]});
+const t = v2rec.time;
+console.log('Forecast record:', {
+  points: t.length,
+  span: t.length ? `${t[0].toISOString()} -> ${t[t.length - 1].toISOString()}` : 'empty',
+  ascending: t.every((d, i) => i === 0 || d > t[i - 1]),
+  envelopeOk: v2rec.flow_median.every((med, i) => v2rec.flow_uncertainty_lower[i] <= med && med <= v2rec.flow_uncertainty_upper[i]),
+  allFinite: v2rec.flow_median.every(v => Number.isFinite(v) && v >= 0),
+});
