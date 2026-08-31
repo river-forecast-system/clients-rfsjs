@@ -1,5 +1,5 @@
 import * as zarr from "zarrita";
-import {floodMapsBase, floodMapsManifest} from "../urls.js";
+import {floodMapsBase, floodMapsRoot} from "../urls.js";
 
 const httpFetcher = async (url) => {
   const r = await fetch(url);
@@ -34,6 +34,9 @@ const globalize = (v, origin) => {
 // consumer already holds the promise, and a later request simply refetches.
 const MAX_CACHED_SLICES = 512;
 const MAX_CACHED_TILES = 64;
+// decoded rivers/tile chunks (RIVER_CHUNK x 4 int16 each, ~32 KB) — a corridor is a near-contiguous
+// riverIndex run, so a session rarely needs more than a handful
+const MAX_CACHED_INDEX_CHUNKS = 64;
 
 function lruGet(cache, key) {
   const v = cache.get(key);
@@ -63,32 +66,66 @@ class FloodMapsIndex {
   dataBase;
   fetcher;
   tilePath;
+  // riverIndex -> tile names, built from the headers of the tiles the viewport has touched. This
+  // is the HIGHLIGHT set (what on screen is mappable), not the lookup: see resolve().
   riverTiles;
   tiles = /* @__PURE__ */ new Map();
   slices = /* @__PURE__ */ new Map();
-  // `${tile}/${riverId}`
+  // `${tile}/${riverIndex}`
   activeTiles = /* @__PURE__ */ new Set();
 
-  // tiles whose river ids have been folded into riverTiles (viewport-driven coverage)
+  // The riverIndex -> store index from the root group's rivers/ subgroup — null when opened via
+  // openTiles() (no root), in which case resolve() and hasCoverage() fall back to riverTiles.
+  //   tileNames  tile id (position in root attrs.tilePaths) -> tile name
+  //   tileArr    zarrita handle on rivers/tile, int16[nRivers, maxTilesPerRiver], fill -1
+  //   chunk      rows per chunk of rivers/tile
+  //   covered    rivers/covered, little-endian bitset over riverIndex
+  riverIndex = null;
+  indexChunks = /* @__PURE__ */ new Map();
+
   /**
-   * The flood library root — manifest.json and the lat=*\/lon=*\/fldpln.zarr stores — comes from
-   * config: it sits under the configured v3Base like every other v3 dataset, so a consumer that
-   * has called configure() need say nothing here. `base` is an escape hatch for tests reading a
-   * local tree off disk with their own fetcher; app code leaves it alone.
-   * Coverage starts empty — call setActiveTiles() to fold viewport tiles' rivers into it.
+   * The flood library root — a zarr v3 group whose zarr.json carries the manifest as attributes,
+   * whose rivers/ subgroup indexes riverIndex -> store, and whose lat=*\/lon=*\/fldpln.zarr stores
+   * hold the data — comes from config: it sits under the configured v3Base like every other v3
+   * dataset, so a consumer that has called configure() need say nothing here. `base` is an escape
+   * hatch for tests reading a local tree off disk with their own fetcher; app code leaves it alone.
+   *
+   * Opening fetches two objects: the root header and the coverage bitset (one chunk, ~580 KB for
+   * 4.76M rivers), after which hasCoverage() answers for any reach on earth with no tile loaded.
+   * The viewport highlight set (riverTiles) still starts empty — setActiveTiles() grows it.
    */
   static async open({fetcher = httpFetcher, base = null} = {}) {
     const root = base ?? floodMapsBase();
     // urls.js owns the filename; an overridden base re-joins it by hand rather than teaching every
     // builder there about a base it will never see in an app.
-    const manBuf = await fetcher(base ? `${base}/manifest.json` : floodMapsManifest());
-    if (!manBuf) throw new Error(`manifest.json not found under ${root}`);
-    const manifest = JSON.parse(new TextDecoder().decode(manBuf));
+    const rootBuf = await fetcher(base ? `${base}/zarr.json` : floodMapsRoot());
+    if (!rootBuf) throw new Error(`zarr.json not found under ${root}`);
+    const manifest = JSON.parse(new TextDecoder().decode(rootBuf)).attributes;
+    if (!manifest?.tiles || !manifest.index || !manifest.tilePaths) {
+      throw new Error(`${root}/zarr.json: not a flood-maps root (no tiles/index/tilePaths attrs)`);
+    }
     const tilePath = /* @__PURE__ */ new Map();
-    for (const [name, t] of Object.entries(manifest.tiles)) tilePath.set(name, t.path);
-    // Coverage is built up from the tiles the viewport actually touches, via setActiveTiles():
-    // each tile's own river id list (read from its zarr.json header) is the source of truth.
-    return new FloodMapsIndex(root, fetcher, tilePath, /* @__PURE__ */ new Map());
+    const tileNames = new Array(manifest.tilePaths.length);
+    for (const [name, t] of Object.entries(manifest.tiles)) {
+      tilePath.set(name, t.path);
+      tileNames[t.id] = name;
+    }
+    const idx = new FloodMapsIndex(root, fetcher, tilePath, /* @__PURE__ */ new Map());
+    const rivers = zarr.root(fetcherStore(`${root}/rivers`, fetcher));
+    const [tileArr, coveredArr] = await Promise.all([
+      zarr.open.v3(rivers.resolve("tile"), {kind: "array"}),
+      zarr.open.v3(rivers.resolve("covered"), {kind: "array"})
+    ]);
+    const covered = (await zarr.get(coveredArr)).data;
+    idx.riverIndex = {
+      tileNames,
+      tileArr,
+      chunk: manifest.index.chunk,
+      width: manifest.index.maxTilesPerRiver,
+      nRivers: manifest.index.nRivers,
+      covered
+    };
+    return idx;
   }
 
   /** Dev/test entry: open named tiles directly (no manifest needed);
@@ -102,7 +139,7 @@ class FloodMapsIndex {
     );
     for (const name of idx.tilePath.keys()) {
       const h = await idx.tile(name);
-      for (const c of h.riverIds) {
+      for (const c of h.riverIndices) {
         const list = idx.riverTiles.get(c);
         if (list) list.push(name);
         else idx.riverTiles.set(c, [name]);
@@ -111,23 +148,94 @@ class FloodMapsIndex {
     return idx;
   }
 
-  /** All river ids with flood-library coverage (transfer-friendly). */
+  /** All river indices with flood-library coverage (transfer-friendly). */
   coverage() {
     return Uint32Array.from(this.riverTiles.keys());
   }
 
-  hasCoverage(riverId) {
-    return this.riverTiles.has(riverId);
+  /** Whether the flood library holds this reach anywhere — from the global bitset when the
+   * root index is open, else from the viewport-loaded tiles. */
+  hasCoverage(riverIndex) {
+    const ri = this.riverIndex;
+    if (!ri) return this.riverTiles.has(riverIndex);
+    if (riverIndex < 0 || riverIndex >= ri.nRivers) return false;
+    return ((ri.covered[riverIndex >> 3] >> (riverIndex & 7)) & 1) === 1;
+  }
+
+  /** The coverage bitset itself (little-endian, bit = riverIndex), for consumers that want to
+   * test membership on their own thread; null without the root index. */
+  coveredBits() {
+    return this.riverIndex?.covered ?? null;
+  }
+
+  /** One decoded chunk of rivers/tile: Int16Array of chunk*width entries, row-major. */
+  indexChunk(k) {
+    let c = lruGet(this.indexChunks, k);
+    if (!c) {
+      const ri = this.riverIndex;
+      const start = k * ri.chunk;
+      const end = Math.min(start + ri.chunk, ri.nRivers);
+      c = lruSet(
+        this.indexChunks,
+        k,
+        zarr.get(ri.tileArr, [zarr.slice(start, end), null]).then((r) => r.data),
+        MAX_CACHED_INDEX_CHUNKS
+      );
+    }
+    return c;
   }
 
   /**
-   * Fold the given tiles' river lists into coverage (riverId -> tiles), loading each new tile's
+   * Which store(s) hold each reach: riverIndex[] -> Map(tile name -> riverIndex[]), the exact set
+   * of stores to open and what to pull from each. Reads rivers/tile, one chunk per
+   * floor(riverIndex / chunk) touched; nothing geometric, and a reach split across tiles lists all
+   * of them whether or not they are on screen. Reaches with no coverage are simply absent.
+   * Without the root index (openTiles) this is the viewport-derived riverTiles map instead.
+   */
+  async resolve(riverIndices) {
+    const out = /* @__PURE__ */ new Map();
+    const add = (name, c) => {
+      const list = out.get(name);
+      if (list) list.push(c);
+      else out.set(name, [c]);
+    };
+    const ri = this.riverIndex;
+    if (!ri) {
+      for (const c of riverIndices) for (const t of this.riverTiles.get(c) ?? []) add(t, c);
+      return out;
+    }
+    const byChunk = /* @__PURE__ */ new Map();
+    for (const c of riverIndices) {
+      if (c < 0 || c >= ri.nRivers) continue;
+      const k = Math.floor(c / ri.chunk);
+      const list = byChunk.get(k);
+      if (list) list.push(c);
+      else byChunk.set(k, [c]);
+    }
+    await Promise.all([...byChunk].map(async ([k, list]) => {
+      const rows = await this.indexChunk(k);
+      for (const c of list) {
+        const base = (c - k * ri.chunk) * ri.width;
+        for (let j = 0; j < ri.width; j++) {
+          const id = rows[base + j];
+          if (id < 0) break;
+          const name = ri.tileNames[id];
+          if (name === void 0) throw new Error(`rivers/tile: riverIndex ${c} names tile id ${id}, not in root tilePaths`);
+          add(name, c);
+        }
+      }
+    }));
+    return out;
+  }
+
+  /**
+   * Fold the given tiles' river lists into coverage (riverIndex -> tiles), loading each new tile's
    * header once. Accumulates: a tile stays active after it leaves the viewport, so coverage
-   * only grows as the user pans. Returns the current coverage river ids (transfer-friendly).
+   * only grows as the user pans. Returns the current coverage river indices (transfer-friendly).
    *
-   * Caveat: a river spanning several tiles is only fully covered once every tile it touches
-   * has been made active — a reach whose flood library extends into an off-screen tile is
-   * under-covered until that tile is panned into view.
+   * This is the on-screen highlight set only. Finding a reach's stores for fetching goes through
+   * resolve() and the root index, so a reach whose library lives in an off-screen tile is still
+   * fetched in full; it is merely not listed here until that tile is panned into view.
    */
   async setActiveTiles(names) {
     for (const name of names) {
@@ -142,7 +250,7 @@ class FloodMapsIndex {
         this.tiles.delete(name);
         continue;
       }
-      for (const c of h.riverIds) {
+      for (const c of h.riverIndices) {
         const list = this.riverTiles.get(c);
         if (list) {
           if (!list.includes(name)) list.push(name);
@@ -167,26 +275,23 @@ class FloodMapsIndex {
     const metaBuf = await this.fetcher(`${storeUrl}/zarr.json`);
     if (!metaBuf) throw new Error(`zarr.json missing for ${name}`);
     const attrs = JSON.parse(new TextDecoder().decode(metaBuf)).attributes;
-    if (!attrs.schemaVersion?.startsWith("tiles-1.")) {
-      throw new Error(`${name}: unsupported store schema ${attrs.schemaVersion}`);
-    }
-    // The store's river directory keys this list `comid` (schema tiles-1.4.x); riverId is this
-    // package's vocabulary everywhere else, so normalize once here and let the rest of the class
-    // read h.riverIds. Fail loudly on drift: a silently missing list means empty coverage, which
-    // looks like "this viewport has no flood data" rather than a schema mismatch.
-    const riverIds = attrs.rivers?.comid;
-    if (!riverIds) throw new Error(`${name}: store attrs.rivers has no comid list`);
+    // The river directory is keyed by GEOGLOWS v3 riverIndex — the reach's row position in
+    // hydrography/group=0/metadata.parquet, the same number every discharge reader takes. Fail
+    // loudly if it is missing: a silently missing list means empty coverage, which looks like
+    // "this viewport has no flood data" rather than a broken store.
+    const riverIndices = attrs.rivers?.riverIndex;
+    if (!riverIndices) throw new Error(`${name}: store attrs.rivers has no riverIndex list`);
     const rank = /* @__PURE__ */ new Map();
-    riverIds.forEach((c, i) => rank.set(c, i));
+    riverIndices.forEach((c, i) => rank.set(c, i));
     const root = zarr.root(fetcherStore(storeUrl, this.fetcher));
-    return {attrs, riverIds, rank, root, arrays: /* @__PURE__ */ new Map()};
+    return {attrs, riverIndices, rank, root, arrays: /* @__PURE__ */ new Map()};
   }
 
   array(h, name) {
     let a = h.arrays.get(name);
     if (!a) {
       // open.v3, not the version-agnostic open: these stores are v3 (openTile has already read
-      // their zarr.json and checked schemaVersion), and the agnostic path guesses v2 first, so
+      // their zarr.json), and the agnostic path guesses v2 first, so
       // every array cost a doomed .zattrs GET before falling back. Worse, that fallback only fires
       // for zarrita's own not-found errors — an origin that answers missing keys with anything but
       // 404 (CloudFront over an S3 bucket without s3:ListBucket returns 403) makes the probe throw
@@ -214,17 +319,17 @@ class FloodMapsIndex {
   }
 
   /** Load (and cache) one river's slice from one tile. */
-  slice(tileName, riverId) {
-    const key = `${tileName}/${riverId}`;
+  slice(tileName, riverIndex) {
+    const key = `${tileName}/${riverIndex}`;
     let s = lruGet(this.slices, key);
-    if (!s) s = lruSet(this.slices, key, this.loadSlice(tileName, riverId), MAX_CACHED_SLICES);
+    if (!s) s = lruSet(this.slices, key, this.loadSlice(tileName, riverIndex), MAX_CACHED_SLICES);
     return s;
   }
 
-  async loadSlice(tileName, riverId) {
+  async loadSlice(tileName, riverIndex) {
     const h = await this.tile(tileName);
-    const r = h.rank.get(riverId);
-    if (r === void 0) throw new Error(`riverId ${riverId} not in tile ${tileName}`);
+    const r = h.rank.get(riverIndex);
+    if (r === void 0) throw new Error(`riverIndex ${riverIndex} not in tile ${tileName}`);
     const d = h.attrs.rivers;
     const {gRow0, gCol0} = h.attrs.grid;
     const vs = d.visitStart[r];
@@ -253,7 +358,7 @@ class FloodMapsIndex {
     runStarts.set(runs);
     runStarts[runs.length] = vc;
     return {
-      riverId,
+      riverIndex,
       tile: tileName,
       nVisit: vc,
       nFsp: d.fspCount[r],
@@ -276,16 +381,15 @@ class FloodMapsIndex {
   }
 
   /**
-   * Fetch every (tile, riverId) slice for the selected rivers. River ids without coverage are
-   * silently skipped (callers gate UI on hasCoverage). A river crossing tiles yields one
-   * slice per owning tile; the slices are disjoint by construction and compose by
-   * scatter-max in the global frame.
+   * Fetch every (tile, riverIndex) slice for the selected rivers, finding the stores through
+   * resolve(). River indices without coverage are silently skipped (callers gate UI on
+   * hasCoverage). A river crossing tiles yields one slice per owning tile; the slices are
+   * disjoint by construction and compose by scatter-max in the global frame.
    */
-  async slicesFor(riverIds) {
+  async slicesFor(riverIndices) {
+    const byTile = await this.resolve(riverIndices);
     const jobs = [];
-    for (const c of riverIds) {
-      for (const t of this.riverTiles.get(c) ?? []) jobs.push(this.slice(t, c));
-    }
+    for (const [t, list] of byTile) for (const c of list) jobs.push(this.slice(t, c));
     return Promise.all(jobs);
   }
 }

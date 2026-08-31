@@ -1,6 +1,6 @@
 {
   "name": "riverforecastsystem",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Client for reading GEOGLOWS RFS data from publicly archived Zarr data on S3.",
   "license": "BSD-3-Clause-Clear",
   "author": "Riley Hales",
@@ -38,17 +38,27 @@
     "numcodecs": "^0.3.2"
   },
   "peerDependenciesMeta": {
-    "chart.js": {"optional": true},
-    "chartjs-adapter-date-fns": {"optional": true},
-    "chartjs-chart-matrix": {"optional": true},
-    "chartjs-plugin-zoom": {"optional": true},
-    "date-fns": {"optional": true}
+    "chart.js": {
+      "optional": true
+    },
+    "chartjs-adapter-date-fns": {
+      "optional": true
+    },
+    "chartjs-chart-matrix": {
+      "optional": true
+    },
+    "chartjs-plugin-zoom": {
+      "optional": true
+    },
+    "date-fns": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^29.0.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-terser": "^1.0.0",
-    "rollup": "4.59.0",
+    "rollup": "4.63.1",
     "vitest": "^4.1.10",
     "zarrita": "^0.7.3"
   },
