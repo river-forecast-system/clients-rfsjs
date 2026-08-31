@@ -38,6 +38,10 @@ const forecastZarr = ({date}) => `${forecastDir({date})}/discharge.zarr`;
 const _floodMapsManifestFile = "manifest.json";
 const _floodMapsTileBoundariesFile = "tile_boundaries.pmtiles";
 const floodMapsBase = () => `${v3Base()}/flood-maps`;
+// flood-maps/ is itself a zarr v3 group: its zarr.json carries the manifest as attributes and
+// its rivers/ subgroup holds the riverIndex -> store index (FloodMapsIndex.open()). manifest.json
+// is the same attributes as plain JSON for readers without zarr.
+const floodMapsRoot = () => `${floodMapsBase()}/zarr.json`;
 const floodMapsManifest = () => `${floodMapsBase()}/${_floodMapsManifestFile}`;
 const floodMapsTileBoundaries = () => `${floodMapsBase()}/${_floodMapsTileBoundariesFile}`;
 // The flow graph behind topology selection (hydrography/riverNetwork.js). It sits under
@@ -65,7 +69,7 @@ export {
   // forecast url builders
   forecastDir, forecastZarr,
   // flood map (FLDPLN) url builders
-  floodMapsBase, floodMapsManifest, floodMapsTileBoundaries, riverNetworkGraph,
+  floodMapsBase, floodMapsRoot, floodMapsManifest, floodMapsTileBoundaries, riverNetworkGraph,
   // map-styles url builders
   stylesets, streamsStyles,
 }
