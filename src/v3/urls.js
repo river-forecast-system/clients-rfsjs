@@ -7,6 +7,17 @@ const _metadataStore = "metadata.zarr";
 const hydrographyGroup = ({group} = {}) => `${v3Base()}/hydrography/group=${group}`;
 const streamsPmtiles = () => `${hydrographyGroup({group: globalGroupNumber})}/${_streamsPmtilesFile}`;
 const hydrographyMetadataZarr = ({group = globalGroupNumber} = {}) => `${hydrographyGroup({group})}/${_metadataStore}`;
+// The geometry is published one GeoParquet per group; the group-0 pmtiles and tables are global.
+const catchmentsPmtiles = () => `${hydrographyGroup({group: globalGroupNumber})}/catchments.pmtiles`;
+const groupsPmtiles = () => `${hydrographyGroup({group: globalGroupNumber})}/groups.pmtiles`;
+const hydrographyMetadataParquet = () => `${hydrographyGroup({group: globalGroupNumber})}/metadata.parquet`;
+const riverNamesJson = () => `${hydrographyGroup({group: globalGroupNumber})}/riverNames.json`;
+const _requireGroup = (group, fn) => {
+  if (group === undefined || group === null) throw new Error(`${fn} requires a group number`);
+  return group;
+};
+const streamsGeoparquet = ({group} = {}) => `${hydrographyGroup({group: _requireGroup(group, "streamsGeoparquet")})}/streams_${group}.geo.parquet`;
+const catchmentsGeoparquet = ({group} = {}) => `${hydrographyGroup({group: _requireGroup(group, "catchmentsGeoparquet")})}/catchments_${group}.geo.parquet`;
 
 // ── retrospective ────────────────────────────────────────────────────────────
 const allowedResolutions = ["hourly", "daily", "monthly", "yearly"];
@@ -44,12 +55,6 @@ const floodMapsBase = () => `${v3Base()}/flood-maps`;
 const floodMapsRoot = () => `${floodMapsBase()}/zarr.json`;
 const floodMapsManifest = () => `${floodMapsBase()}/${_floodMapsManifestFile}`;
 const floodMapsTileBoundaries = () => `${floodMapsBase()}/${_floodMapsTileBoundariesFile}`;
-// The flow graph behind topology selection (hydrography/riverNetwork.js). It sits under
-// flood-maps/ because that is where the FIM pipeline writes it — it is derived from the library's
-// own coverage (comid_tiles.parquet), so it covers the reaches the flood library covers, a subset
-// of the network rather than all of it.
-const _riverNetworkGraphFile = "network_graph_fim.json";
-const riverNetworkGraph = () => `${floodMapsBase()}/${_riverNetworkGraphFile}`;
 
 // ── map-styles ─────────────────────────────────────────────────────────────
 const stylesets = Object.freeze(["timeseries", "max-flow", "time-to-peak", "below-q95"]);
@@ -64,12 +69,14 @@ const streamsStyles = ({date, styleset}) => {
 export {
   // hydrography url builders
   hydrographyGroup, streamsPmtiles, hydrographyMetadataZarr,
+  catchmentsPmtiles, groupsPmtiles, hydrographyMetadataParquet, riverNamesJson,
+  streamsGeoparquet, catchmentsGeoparquet,
   // retrospective url builders
   retrospectiveZarr, returnPeriodsZarr, maximumsZarr,
   // forecast url builders
   forecastDir, forecastZarr,
   // flood map (FLDPLN) url builders
-  floodMapsBase, floodMapsRoot, floodMapsManifest, floodMapsTileBoundaries, riverNetworkGraph,
+  floodMapsBase, floodMapsRoot, floodMapsManifest, floodMapsTileBoundaries,
   // map-styles url builders
   stylesets, streamsStyles,
 }
