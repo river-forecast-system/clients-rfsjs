@@ -9,8 +9,9 @@ import fdc from "./fdc.js";
 import sfdc from "./sfdc.js";
 import polyfits from "./polyfits.js";
 import hydrowebWse from "./hydrowebWse.js";
-import {metadataTable, riverToVpu, riverToLatlon, latlonToRiver} from "./metadata.js";
+import {metadataTable, riverToVpu, riverToLatlon} from "./metadata.js";
 
+// latlonToRiver intentionally not exported for now (impl kept in metadata.js).
 export {
   forecast,
   retrospective,
@@ -23,6 +24,5 @@ export {
   hydrowebWse,
   metadataTable,
   riverToVpu,
-  riverToLatlon,
-  latlonToRiver
+  riverToLatlon
 };
