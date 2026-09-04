@@ -1,9 +1,9 @@
-import {CategoryScale, Chart, Filler, Legend, LinearScale, LineController, LineElement, PointElement, TimeScale, Title, Tooltip} from "chart.js";
+import {BarController, BarElement, CategoryScale, Chart, Filler, Legend, LinearScale, LineController, LineElement, PointElement, TimeScale, Title, Tooltip} from "chart.js";
 import "chartjs-adapter-date-fns";
 import {MONTH_START_DOY} from "./derive";
 import {t} from "./translations";
 
-Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, TimeScale, Filler, Legend, Tooltip, Title);
+Chart.register(LineController, LineElement, PointElement, BarController, BarElement, LinearScale, CategoryScale, TimeScale, Filler, Legend, Tooltip, Title);
 Chart.defaults.plugins.title.font = {...Chart.defaults.plugins.title.font, size: 18};
 Chart.defaults.plugins.legend.position = "right";
 Chart.defaults.scale.title.font = {size: 14, weight: "bold"};

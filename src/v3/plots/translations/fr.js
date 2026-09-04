@@ -44,5 +44,11 @@ export default {
   "control.zoomHint": "glisser un cadre pour zoomer · maj+glisser pour déplacer",
 
   "months": ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."],
-  "status": ["Élevé", "Au-dessus de la normale", "Normale", "En dessous de la normale", "Faible"]
+  "status": ["Élevé", "Au-dessus de la normale", "Normale", "En dessous de la normale", "Faible"],
+  "chart.exceedanceProbabilities": "Probabilité de dépasser chaque période de retour",
+  "chart.flowAnomaly": "Anomalie du débit prévu par rapport à la climatologie",
+  "axis.membersExceeding": "Membres dépassant (%)",
+  "axis.flowAnomaly": "Écart par rapport à la normale (m³/s)",
+  "series.alertThreshold": "Seuil d'alerte",
+  "series.flowAnomaly": "Écart par rapport à la normale",
 };

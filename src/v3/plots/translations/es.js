@@ -44,5 +44,11 @@ export default {
   "control.zoomHint": "arrastra un recuadro para ampliar · mayús+arrastrar para desplazar",
 
   "months": ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"],
-  "status": ["Alto", "Sobre lo normal", "Normal", "Bajo lo normal", "Bajo"]
+  "status": ["Alto", "Sobre lo normal", "Normal", "Bajo lo normal", "Bajo"],
+  "chart.exceedanceProbabilities": "Probabilidad de superar cada período de retorno",
+  "chart.flowAnomaly": "Anomalía del caudal pronosticado frente a la climatología",
+  "axis.membersExceeding": "Miembros que superan (%)",
+  "axis.flowAnomaly": "Desviación de lo normal (m³/s)",
+  "series.alertThreshold": "Umbral de alerta",
+  "series.flowAnomaly": "Desviación de lo normal",
 };

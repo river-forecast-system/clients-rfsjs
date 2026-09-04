@@ -55,5 +55,11 @@ export default {
   // Ordered lists, not keyed lookups: index is the month number / status band, so a translation
   // must keep the order rather than the wording. Status runs high -> low.
   "months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
-  "status": ["High", "Above normal", "Normal", "Below normal", "Low"]
+  "status": ["High", "Above normal", "Normal", "Below normal", "Low"],
+  "chart.exceedanceProbabilities": "Chance of exceeding each return period",
+  "chart.flowAnomaly": "Forecast flow anomaly vs. climatology",
+  "axis.membersExceeding": "Members exceeding (%)",
+  "axis.flowAnomaly": "Departure from normal (m³/s)",
+  "series.alertThreshold": "Alert threshold",
+  "series.flowAnomaly": "Departure from normal",
 };

@@ -2,6 +2,7 @@
 
 import {tf} from "./translations";
 import {rgba} from "./shared";
+import {normalizeLevels as toLevels} from "../discharge/warningLevels";
 
 /**
  * Warning levels drawn across a hydrograph — return periods, or any other set of named discharge
@@ -19,48 +20,20 @@ import {rgba} from "./shared";
  * argument and the consuming app is the one that remembers it.
  */
 
-// Ascending severity. Deliberately the v2 hydroviewer's return-period palette, in its order, so a
-// 2/5/10/25/50/100-year set renders in the colours users already read as "yellow is a nuisance
-// flood, violet is a catastrophe".
-const SEVERITY_RAMP = [
-  "rgb(254, 240, 1)",
-  "rgb(253, 154, 1)",
-  "rgb(255, 56, 5)",
-  "rgb(255, 0, 0)",
-  "rgb(128, 0, 106)",
-  "rgb(128, 0, 246)"
-];
-
-// Sample the ramp by position so any number of levels spans the same yellow-to-violet range. With
-// exactly six levels this is the identity, which is the common case (the standard return periods).
-const rampColor = (i, n) => SEVERITY_RAMP[Math.round((i * (SEVERITY_RAMP.length - 1)) / Math.max(1, n - 1))];
-
-// Enough digits to tell two thresholds apart without implying precision the fit doesn't have.
-const formatValue = (v) => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
-
 /**
- * Accept either shape and return one: levels ascending, each with a label, a value and a colour.
+ * Give each level the words a chart shows it under.
  *
- *   {2: 451.2, 5: 780.4, ...}                        return periods keyed by recurrence interval
- *   [{label: "Bankfull", value: 900, color: "..."}]  any other set of named warning levels
- *
- * Anything without a finite value is dropped rather than drawn — a store with no fit for a reach
- * writes NaN, and a reach with no fit has no threshold to show. Empty is spelled out rather than
- * left to Number(), which turns both null and "" into a real level at zero.
+ * The levels themselves — which ones there are, in what order, at what value, in what colour — are
+ * discharge/warningLevels.js's, because a threshold means the same thing whether it is drawn on a
+ * hydrograph or counted in an exceedance table, and the two must not be able to disagree about it.
+ * What is added here is display text and only display text: a recurrence interval becomes
+ * "5-year" in the reader's language, and the legend entry pairs that with the discharge.
  */
-const toValue = (value) => (value === null || value === undefined || value === "" ? NaN : Number(value));
-
 function normalizeLevels(input) {
-  if (!input) return [];
-  const raw = Array.isArray(input)
-    ? input.map((lvl) => ({label: lvl.label, value: toValue(lvl.value), color: lvl.color}))
-    : Object.entries(input).map(([years, value]) => ({label: tf("label.returnPeriodYears", {n: years}), value: toValue(value)}));
-  const levels = raw.filter((lvl) => Number.isFinite(lvl.value)).sort((a, b) => a.value - b.value);
-  return levels.map((lvl, i) => ({
-    ...lvl,
-    color: lvl.color ?? rampColor(i, levels.length),
-    text: `${lvl.label} · ${formatValue(lvl.value)}`
-  }));
+  return toLevels(input).map((lvl) => {
+    const label = typeof lvl.key === "number" ? tf("label.returnPeriodYears", {n: lvl.key}) : String(lvl.key);
+    return {...lvl, label, text: `${label} · ${lvl.valueText}`};
+  });
 }
 
 /**
